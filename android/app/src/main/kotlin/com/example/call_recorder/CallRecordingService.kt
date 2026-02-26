@@ -87,18 +87,31 @@ class CallRecordingService : Service() {
 
     private fun startRecording() {
         try {
-            val dir = File(
-                Environment.getExternalStorageDirectory(),
-                RECORDING_DIR
-            )
+            val rootDir = Environment.getExternalStorageDirectory()
+            val dir = File(rootDir, RECORDING_DIR)
+            
             if (!dir.exists()) {
-                dir.mkdirs()
+                val created = dir.mkdirs()
+                if (!created) {
+                    Log.e(TAG, "Failed to create directory: ${dir.absolutePath}. Checking permissions...")
+                } else {
+                    Log.d(TAG, "Created directory: ${dir.absolutePath}")
+                }
             }
 
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val cleanNumber = phoneNumber.replace(Regex("[^0-9+]"), "")
-            val fileName = "call_${cleanNumber}_${timestamp}.m4a"
-            outputFile = File(dir, fileName).absolutePath
+            if (!dir.exists()) {
+                // Try fallback to app-specific external storage if root fails
+                val fallbackDir = File(getExternalFilesDir(null), RECORDING_DIR)
+                if (!fallbackDir.exists()) fallbackDir.mkdirs()
+                outputFile = File(fallbackDir, "call_${phoneNumber.replace(Regex("[^0-9+]"), "")}_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.m4a").absolutePath
+                Log.w(TAG, "Root directory inaccessible, using fallback: $outputFile")
+            } else {
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                val cleanNumber = phoneNumber.replace(Regex("[^0-9+]"), "")
+                val fileName = "call_${cleanNumber}_${timestamp}.m4a"
+                outputFile = File(dir, fileName).absolutePath
+            }
+            
             currentFilePath = outputFile
 
             // Try VOICE_CALL first for both-side recording

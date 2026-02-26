@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.Environment
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -45,39 +46,47 @@ class MainActivity : FlutterActivity() {
         // Method Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "getRecordings" -> {
-                        result.success(getRecordingsList())
-                    }
-                    "deleteRecording" -> {
-                        val filePath = call.argument<String>("file_path")
-                        if (filePath != null) {
-                            val deleted = deleteRecording(filePath)
-                            result.success(deleted)
-                        } else {
-                            result.error("INVALID_ARG", "file_path is required", null)
+                try {
+                    when (call.method) {
+                        "getRecordings" -> {
+                            result.success(getRecordingsList())
+                        }
+                        "deleteRecording" -> {
+                            val filePath = call.argument<String>("file_path")
+                            if (filePath != null) {
+                                val deleted = deleteRecording(filePath)
+                                result.success(deleted)
+                            } else {
+                                result.error("INVALID_ARG", "file_path is required", null)
+                            }
+                        }
+                        "toggleAutoRecord" -> {
+                            val enabled = call.argument<Boolean>("enabled") ?: true
+                            setAutoRecord(enabled)
+                            Log.d("MainActivity", "toggleAutoRecord: success setting to $enabled")
+                            result.success(true) // Return true to indicate success
+                        }
+                        "isAutoRecordEnabled" -> {
+                            val isEnabled = isAutoRecordEnabled()
+                            Log.d("MainActivity", "isAutoRecordEnabled: returning $isEnabled")
+                            result.success(isEnabled)
+                        }
+                        "getRecordingPath" -> {
+                            result.success(getRecordingPath())
+                        }
+                        "isRecording" -> {
+                            result.success(CallRecordingService.isRecording)
+                        }
+                        "getCurrentAudioSource" -> {
+                            result.success(CallRecordingService.currentAudioSource)
+                        }
+                        else -> {
+                            result.notImplemented()
                         }
                     }
-                    "toggleAutoRecord" -> {
-                        val enabled = call.argument<Boolean>("enabled") ?: true
-                        setAutoRecord(enabled)
-                        result.success(enabled)
-                    }
-                    "isAutoRecordEnabled" -> {
-                        result.success(isAutoRecordEnabled())
-                    }
-                    "getRecordingPath" -> {
-                        result.success(getRecordingPath())
-                    }
-                    "isRecording" -> {
-                        result.success(CallRecordingService.isRecording)
-                    }
-                    "getCurrentAudioSource" -> {
-                        result.success(CallRecordingService.currentAudioSource)
-                    }
-                    else -> {
-                        result.notImplemented()
-                    }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error in method channel: ${e.message}", e)
+                    result.error("EXCEPTION", e.message, null)
                 }
             }
 
@@ -109,26 +118,49 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun getRecordingPath(): String {
-        val dir = File(Environment.getExternalStorageDirectory(), CallRecordingService.RECORDING_DIR)
-        if (!dir.exists()) dir.mkdirs()
+        val rootDir = Environment.getExternalStorageDirectory()
+        val dir = File(rootDir, CallRecordingService.RECORDING_DIR)
+        if (!dir.exists()) {
+            if (!dir.mkdirs()) {
+                return File(getExternalFilesDir(null), CallRecordingService.RECORDING_DIR).apply { if (!exists()) mkdirs() }.absolutePath
+            }
+        }
         return dir.absolutePath
     }
 
     private fun getRecordingsList(): List<Map<String, Any>> {
-        val dir = File(Environment.getExternalStorageDirectory(), CallRecordingService.RECORDING_DIR)
-        if (!dir.exists()) return emptyList()
-
-        return dir.listFiles()
-            ?.filter { it.isFile && it.extension == "m4a" }
-            ?.sortedByDescending { it.lastModified() }
-            ?.map { file ->
-                mapOf(
+        val recordings = mutableListOf<Map<String, Any>>()
+        
+        // Check main directory
+        val mainDir = File(Environment.getExternalStorageDirectory(), CallRecordingService.RECORDING_DIR)
+        if (mainDir.exists()) {
+            mainDir.listFiles()?.filter { it.isFile && it.extension == "m4a" }?.forEach { file ->
+                recordings.add(mapOf(
                     "file_path" to file.absolutePath,
                     "file_name" to file.name,
                     "file_size" to file.length(),
                     "last_modified" to file.lastModified()
-                )
-            } ?: emptyList()
+                ))
+            }
+        }
+        
+        // Check fallback directory
+        val fallbackDir = File(getExternalFilesDir(null), CallRecordingService.RECORDING_DIR)
+        if (fallbackDir.exists()) {
+            fallbackDir.listFiles()?.filter { it.isFile && it.extension == "m4a" }?.forEach { file ->
+                // Avoid duplicates if paths overlap (unlikely but safe)
+                if (recordings.none { it["file_path"] == file.absolutePath }) {
+                    recordings.add(mapOf(
+                        "file_path" to file.absolutePath,
+                        "file_name" to file.name,
+                        "file_size" to file.length(),
+                        "last_modified" to file.lastModified()
+                    ))
+                }
+            }
+        }
+
+        return recordings.sortedByDescending { it["last_modified"] as Long }
     }
 
     private fun deleteRecording(filePath: String): Boolean {
@@ -138,7 +170,8 @@ class MainActivity : FlutterActivity() {
 
     private fun setAutoRecord(enabled: Boolean) {
         val prefs = getSharedPreferences(CallReceiver.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(CallReceiver.KEY_AUTO_RECORD, enabled).apply()
+        Log.d("MainActivity", "Setting auto-record to: $enabled")
+        prefs.edit().putBoolean(CallReceiver.KEY_AUTO_RECORD, enabled).commit()
     }
 
     private fun isAutoRecordEnabled(): Boolean {

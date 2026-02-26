@@ -63,10 +63,14 @@ class RecordingProvider extends ChangeNotifier {
 
   Future<void> toggleAutoRecord() async {
     final newValue = !_autoRecordEnabled;
+    debugPrint('Provider: Toggling auto-record to: $newValue');
     final success = await _recordingService.toggleAutoRecord(newValue);
     if (success) {
       _autoRecordEnabled = newValue;
+      debugPrint('Provider: Successfully updated auto-record to: $_autoRecordEnabled');
       notifyListeners();
+    } else {
+      debugPrint('Provider: Failed to update auto-record');
     }
   }
 

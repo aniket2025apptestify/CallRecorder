@@ -23,25 +23,29 @@ class CallReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
 
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val autoRecord = prefs.getBoolean(KEY_AUTO_RECORD, true)
 
-        if (!autoRecord) {
-            Log.d(TAG, "Auto-record is disabled, ignoring call state change")
-            return
-        }
-
-        val stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
+        val stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
         val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
 
         val state = when (stateStr) {
             TelephonyManager.EXTRA_STATE_IDLE -> TelephonyManager.CALL_STATE_IDLE
             TelephonyManager.EXTRA_STATE_OFFHOOK -> TelephonyManager.CALL_STATE_OFFHOOK
             TelephonyManager.EXTRA_STATE_RINGING -> TelephonyManager.CALL_STATE_RINGING
-            else -> return
+            else -> lastState // Maintain state if unknown
         }
 
-        onCallStateChanged(context, state, number)
+        Log.d(TAG, "onReceive: state=$stateStr, autoRecord=$autoRecord")
+
+        if (!autoRecord) {
+            Log.d(TAG, "Auto-record is disabled in settings, ignoring call state change but syncing state")
+            lastState = state // Still sync state to avoid jumps if re-enabled mid-call
+            return
+        }
+
+        onCallStateChanged(appContext, state, number)
     }
 
     private fun onCallStateChanged(context: Context, state: Int, number: String?) {
